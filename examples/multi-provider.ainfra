@@ -1,0 +1,43 @@
+import ai.remote.anthropic
+import ai.remote.gemini
+import ai.remote.microsoft
+import ai.remote.deepseek
+import ai.remote.huggingface
+
+// $start$
+
+model claude {
+    engine = "anthropic"
+    name = "claude-3-5-sonnet-latest"
+}
+
+model gemini_flash {
+    engine = "gemini"
+    name = "gemini-1.5-flash"
+}
+
+model azure_gpt {
+    engine = "microsoft"
+    name = "gpt-4.1-mini"
+}
+
+model deepseek_chat {
+    engine = "deepseek"
+    name = "deepseek-chat"
+}
+
+model hf_local {
+    engine = "huggingface"
+    name = "meta-llama/Llama-3.2-3B-Instruct"
+}
+
+prompt answer {
+    text = "Summarize the InfraOS object graph: {input}"
+}
+
+agent helper {
+    model = claude
+    prompt = answer
+}
+
+run agent helper on "Show provider support."

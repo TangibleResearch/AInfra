@@ -1,0 +1,9 @@
+[package]
+name = "ainfra-optimizer"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[lib]
+name = "ainfra_optimizer"
+path = "src/lib.rs"

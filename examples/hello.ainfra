@@ -1,0 +1,21 @@
+import ai.remote.openai
+
+// $start$
+
+model cloud {
+    engine = "openai"
+    name = "gpt-4.1-mini"
+    max_output_tokens = 128
+    temperature = 0.7
+}
+
+prompt answer {
+    text = "Answer clearly and briefly: {input}"
+}
+
+agent helper {
+    model = cloud
+    prompt = answer
+}
+
+run agent helper on "What is InfraVM?"

@@ -1,0 +1,19 @@
+import ai.local.ollama
+
+// $start$
+
+model local {
+    engine = "ollama"
+    name = "llama3.2"
+}
+
+prompt answer {
+    text = "Answer clearly and briefly: {input}"
+}
+
+agent helper {
+    model = local
+    prompt = answer
+}
+
+run agent helper on "What is PointRun?"

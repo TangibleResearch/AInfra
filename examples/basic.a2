@@ -1,0 +1,33 @@
+import ai.local.ollama
+import ai.net.port
+
+var PORT = 8080
+
+model brain {
+    engine = "ollama"
+    name = "llama3.2"
+}
+
+prompt answer {
+    text = "Answer this: {input}"
+}
+
+agent helper {
+    model = brain
+    prompt = answer
+    tools = ["files.read", "shell.safe"]
+}
+
+port api {
+    protocol = "http"
+    host = "127.0.0.1"
+    port = PORT
+
+    on_request {
+        input = request.body.question
+        output = helper.ask(input)
+        return output
+    }
+}
+
+run port api

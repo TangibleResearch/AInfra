@@ -1,0 +1,26 @@
+import ai.remote.openai
+
+// $start$
+
+model cloud {
+    engine = "openai"
+    name = "gpt-4.1-mini"
+    max_output_tokens = 256
+    temperature = 0.4
+}
+
+prompt operator {
+    text = "You are the InfraOS operator. Explain the next step for: {input}"
+}
+
+agent control_agent {
+    model = cloud
+    prompt = operator
+}
+
+port console {
+    protocol = "stdio"
+    agent = control_agent
+}
+
+run agent control_agent on "Boot the first AIF object graph."
