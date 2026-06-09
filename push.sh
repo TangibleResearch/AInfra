@@ -445,6 +445,7 @@ This repo contains:
 - Rust parser
 - compiler validation
 - AIF writer
+- Rust optimizer dependency used by the compiler
 - AIF format docs
 - language docs
 - examples
@@ -687,6 +688,8 @@ prepare_aif() {
   repo="$REPOS_DIR/AIF"
   mkdir -p "$repo"
   copy_dir "$ROOT_DIR/ainfra-compiler/" "$repo/ainfra-compiler/"
+  mkdir -p "$repo/optimizer"
+  copy_dir "$ROOT_DIR/optimizer/rust/" "$repo/optimizer/rust/"
   mkdir -p "$repo/docs" "$repo/examples"
   cp "$ROOT_DIR/docs/aif-format.md" "$repo/docs/" 2>/dev/null || true
   cp "$ROOT_DIR/docs/language.md" "$repo/docs/" 2>/dev/null || true
