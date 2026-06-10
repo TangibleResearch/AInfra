@@ -47,6 +47,11 @@ void vm_openai_free_result(VMOpenAIResult *result);
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef VM_JSON_IMPLEMENTATION
+#define VM_JSON_IMPLEMENTATION
+#endif
+#include "vm_json.h"
+
 #ifndef VM_OPENAI_DEFAULT_MODEL
 #define VM_OPENAI_DEFAULT_MODEL "gpt-4.1-mini"
 #endif
@@ -68,22 +73,6 @@ static void vm_openai_set_error(VMOpenAIResult *result, const char *message) {
     result->ok = 0;
     result->text = NULL;
     snprintf(result->error, sizeof(result->error), "%s", message ? message : "unknown OpenAI connector error");
-}
-
-static char *vm_openai_strdup(const char *text) {
-    size_t len;
-    char *copy;
-
-    if (!text) {
-        text = "";
-    }
-    len = strlen(text);
-    copy = (char *)malloc(len + 1);
-    if (!copy) {
-        return NULL;
-    }
-    memcpy(copy, text, len + 1);
-    return copy;
 }
 
 static int vm_openai_buffer_append(VMOpenAIBuffer *buffer, const char *data, size_t len) {
@@ -253,129 +242,34 @@ static char *vm_openai_build_payload(VMOpenAIConfig config, const char *prompt) 
     return payload;
 }
 
-static const char *vm_openai_find_json_string_value(const char *json, const char *key) {
-    char pattern[64];
-    const char *p;
-    const char *colon;
-
-    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
-    p = strstr(json, pattern);
-    while (p) {
-        colon = p + strlen(pattern);
-        while (*colon == ' ' || *colon == '\t' || *colon == '\r' || *colon == '\n') {
-            colon++;
-        }
-        if (*colon == ':') {
-            colon++;
-            while (*colon == ' ' || *colon == '\t' || *colon == '\r' || *colon == '\n') {
-                colon++;
-            }
-            if (*colon == '"') {
-                return colon + 1;
-            }
-        }
-        p = strstr(p + 1, pattern);
-    }
-    return NULL;
-}
-
-static char *vm_openai_parse_json_string(const char *start) {
-    VMOpenAIBuffer out;
-    const char *p;
-    char ch;
-
-    memset(&out, 0, sizeof(out));
-    p = start;
-    while (*p) {
-        ch = *p++;
-        if (ch == '"') {
-            return out.data ? out.data : vm_openai_strdup("");
-        }
-        if (ch == '\\') {
-            ch = *p++;
-            switch (ch) {
-                case '"':
-                case '\\':
-                case '/':
-                    if (!vm_openai_buffer_append(&out, &ch, 1)) goto oom;
-                    break;
-                case 'b':
-                    ch = '\b';
-                    if (!vm_openai_buffer_append(&out, &ch, 1)) goto oom;
-                    break;
-                case 'f':
-                    ch = '\f';
-                    if (!vm_openai_buffer_append(&out, &ch, 1)) goto oom;
-                    break;
-                case 'n':
-                    ch = '\n';
-                    if (!vm_openai_buffer_append(&out, &ch, 1)) goto oom;
-                    break;
-                case 'r':
-                    ch = '\r';
-                    if (!vm_openai_buffer_append(&out, &ch, 1)) goto oom;
-                    break;
-                case 't':
-                    ch = '\t';
-                    if (!vm_openai_buffer_append(&out, &ch, 1)) goto oom;
-                    break;
-                case 'u':
-                    /* Keep unicode escapes readable enough for the VM stub path. */
-                    if (!vm_openai_buffer_append(&out, "\\u", 2)) goto oom;
-                    if (!vm_openai_buffer_append(&out, p, 4)) goto oom;
-                    p += 4;
-                    break;
-                default:
-                    if (!ch || !vm_openai_buffer_append(&out, &ch, 1)) goto oom;
-                    break;
-            }
-        } else {
-            if (!vm_openai_buffer_append(&out, &ch, 1)) goto oom;
-        }
-    }
-
-    free(out.data);
-    return NULL;
-
-oom:
-    free(out.data);
-    return NULL;
-}
-
 static char *vm_openai_extract_text(const char *json) {
-    const char *start;
+    char *text;
 
     if (!json) {
         return NULL;
     }
 
-    start = vm_openai_find_json_string_value(json, "output_text");
-    if (start) {
-        return vm_openai_parse_json_string(start);
-    }
+    text = vm_json_find_string_value(json, "output_text");
+    if (text) return text;
 
-    start = vm_openai_find_json_string_value(json, "text");
-    if (start) {
-        return vm_openai_parse_json_string(start);
-    }
+    text = vm_json_find_string_value(json, "text");
+    if (text) return text;
 
     return NULL;
 }
 
 static char *vm_openai_extract_error(const char *json) {
-    const char *start;
+    char *text;
 
     if (!json) {
         return NULL;
     }
-    start = vm_openai_find_json_string_value(json, "message");
-    if (start) {
-        return vm_openai_parse_json_string(start);
-    }
-    start = vm_openai_find_json_string_value(json, "error");
-    if (start) {
-        return vm_openai_parse_json_string(start);
-    }
+    text = vm_json_find_string_value(json, "message");
+    if (text) return text;
+
+    text = vm_json_find_string_value(json, "error");
+    if (text) return text;
+
     return NULL;
 }
 

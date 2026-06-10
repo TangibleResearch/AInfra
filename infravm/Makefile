@@ -6,7 +6,7 @@ LDLIBS ?= -lcurl
 
 all: infravm
 
-infravm: infravm.c infravm.h vm_openai.h vm_ollama.h ../optimizer/c/optimizer.c ../optimizer/c/optimizer.h
+infravm: infravm.c infravm.h vm_openai.h vm_json.h vm_ollama.h ../optimizer/c/optimizer.c ../optimizer/c/optimizer.h
 	$(CC) $(CFLAGS) -I../optimizer/c -o $@ infravm.c ../optimizer/c/optimizer.c $(LDLIBS)
 
 clean:

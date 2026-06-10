@@ -12,3 +12,12 @@ v0.1 behavior:
 6. If the engine is unsupported, print a clear stub message.
 
 OpenAI keys are read only from `OPENAI_API_KEY`.
+
+## Parsing Boundary
+
+The Rust compiler owns AInfra source lexing and parsing. InfraVM should execute
+compiled AIF and avoid re-parsing the language.
+
+The C VM does include a small JSON tokenizer/parser in `vm_json.h` for provider
+connector responses. This prevents fragile substring searches when model output
+contains conversational text that happens to mention JSON-looking keys.
