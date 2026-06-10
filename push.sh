@@ -158,6 +158,12 @@ Or run the full demo:
 shell/infraos.sh demo
 ```
 
+## Deep Documentation
+
+For a full technical walkthrough of the compiler, AIF format, InfraVM runtime, PointRun, provider connectors, InfraOS backend, authentication, privileges, UI, shell workflow, security limits, and roadmap, read:
+
+- [AInfra Deep Dive](docs/ainfra-deep-dive.md)
+
 ## Environment Variables
 
 Provider keys are optional unless you run cloud models:
