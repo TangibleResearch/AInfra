@@ -249,10 +249,10 @@ static char *vm_openai_extract_text(const char *json) {
         return NULL;
     }
 
-    text = vm_json_find_string_value(json, "output_text");
+    text = vm_json_find_string_in_object_with_string(json, "type", "output_text", "text");
     if (text) return text;
 
-    text = vm_json_find_string_value(json, "text");
+    text = vm_json_find_string_value(json, "output_text");
     if (text) return text;
 
     return NULL;

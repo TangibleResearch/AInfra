@@ -5,38 +5,65 @@ mod parser;
 
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use aif_writer::write_aif;
 use lexer::Lexer;
 use parser::Parser;
 
 fn usage(program: &str) -> String {
-    format!("Usage:\n  {program} <input.ainfra> [-o output.aif]\n  {program} --help")
+    format!(
+        "Usage:\n  {program} <input.ainfra> [-o output.aif] [--namespace name]\n  {program} --help"
+    )
 }
 
-fn parse_args() -> Result<(PathBuf, PathBuf), String> {
+fn parse_args() -> Result<(PathBuf, PathBuf, Option<String>), String> {
     let mut args = env::args().collect::<Vec<_>>();
     let program = args.remove(0);
     if args.is_empty() || args.iter().any(|arg| arg == "-h" || arg == "--help") {
         return Err(usage(&program));
     }
     let input = PathBuf::from(args.remove(0));
-    let output = if args.first().map(String::as_str) == Some("-o") {
-        if args.len() != 2 {
-            return Err(usage(&program));
+    let mut output = input.with_extension("aif");
+    let mut namespace = None;
+    while !args.is_empty() {
+        match args.remove(0).as_str() {
+            "-o" => {
+                if args.is_empty() {
+                    return Err(usage(&program));
+                }
+                output = PathBuf::from(args.remove(0));
+            }
+            "--namespace" => {
+                if args.is_empty() {
+                    return Err(usage(&program));
+                }
+                namespace = Some(args.remove(0));
+            }
+            _ => return Err(usage(&program)),
         }
-        PathBuf::from(args.remove(1))
-    } else if args.is_empty() {
-        input.with_extension("aif")
-    } else {
-        return Err(usage(&program));
-    };
-    Ok((input, output))
+    }
+    Ok((input, output, namespace))
+}
+
+fn namespace_from_path(path: &Path) -> String {
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("workspace");
+    let mut out = String::new();
+    for ch in stem.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.' {
+            out.push(ch);
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    out.trim_matches('-').to_string()
 }
 
 fn main() {
-    let (input, output) = match parse_args() {
+    let (input, output, namespace_arg) = match parse_args() {
         Ok(paths) => paths,
         Err(message) => {
             eprintln!("{message}");
@@ -68,7 +95,8 @@ fn main() {
         }
     };
 
-    let bytes = match write_aif(&program) {
+    let namespace = namespace_arg.unwrap_or_else(|| namespace_from_path(&output));
+    let bytes = match write_aif(&program, &namespace) {
         Ok(bytes) => bytes,
         Err(err) => {
             eprintln!("compile error: {err}");

@@ -240,6 +240,17 @@ fn validate(program: &Program) -> Result<(), CompileError> {
                 }
             }
         }
+        if block.kind == ObjectType::Port {
+            if let Some(route) = prop_text(block, "route").or_else(|| prop_text(block, "agent")) {
+                if program.find_block(ObjectType::Agent, route).is_none() {
+                    return Err(CompileError::new(
+                        block.line,
+                        block.col,
+                        format!("port route `{route}` does not reference an agent"),
+                    ));
+                }
+            }
+        }
     }
     for run in &program.runs {
         let kind = run.kind.as_deref().unwrap_or("agent");

@@ -13,6 +13,12 @@ extern "C" {
  */
 
 char *vm_json_find_string_value(const char *json, const char *key);
+char *vm_json_find_string_in_object_with_string(
+    const char *json,
+    const char *match_key,
+    const char *match_value,
+    const char *result_key
+);
 
 #ifdef __cplusplus
 }
@@ -216,6 +222,14 @@ static void vm_json_free_token(VMJsonToken *token) {
 }
 
 static int vm_json_search_from_token(VMJsonParser *parser, VMJsonToken token, const char *key, char **out);
+static int vm_json_search_match_from_token(
+    VMJsonParser *parser,
+    VMJsonToken token,
+    const char *match_key,
+    const char *match_value,
+    const char *result_key,
+    char **out
+);
 
 static int vm_json_search_object(VMJsonParser *parser, const char *key, char **out) {
     for (;;) {
@@ -291,6 +305,134 @@ char *vm_json_find_string_value(const char *json, const char *key) {
     parser.pos = 0;
     token = vm_json_next(&parser);
     if (vm_json_search_from_token(&parser, token, key, &out)) return out;
+    return NULL;
+}
+
+static int vm_json_search_match_object(
+    VMJsonParser *parser,
+    const char *match_key,
+    const char *match_value,
+    const char *result_key,
+    char **out
+) {
+    int matched = 0;
+    char *local_result = NULL;
+
+    for (;;) {
+        VMJsonToken name = vm_json_next(parser);
+        VMJsonToken colon;
+        VMJsonToken value;
+
+        if (name.kind == VM_JSON_RBRACE) {
+            if (matched && local_result) {
+                *out = local_result;
+                return 1;
+            }
+            free(local_result);
+            return 0;
+        }
+        if (name.kind != VM_JSON_STRING) {
+            vm_json_free_token(&name);
+            free(local_result);
+            return 0;
+        }
+        colon = vm_json_next(parser);
+        if (colon.kind != VM_JSON_COLON) {
+            vm_json_free_token(&name);
+            free(local_result);
+            return 0;
+        }
+        value = vm_json_next(parser);
+        if (value.kind == VM_JSON_STRING) {
+            if (strcmp(name.text, match_key) == 0 && strcmp(value.text, match_value) == 0) {
+                matched = 1;
+            }
+            if (strcmp(name.text, result_key) == 0 && !local_result) {
+                local_result = value.text;
+                value.text = NULL;
+            }
+        } else if (vm_json_search_match_from_token(parser, value, match_key, match_value, result_key, out)) {
+            vm_json_free_token(&name);
+            free(local_result);
+            return 1;
+        }
+        vm_json_free_token(&name);
+        vm_json_free_token(&value);
+
+        value = vm_json_next(parser);
+        if (value.kind == VM_JSON_RBRACE) {
+            if (matched && local_result) {
+                *out = local_result;
+                return 1;
+            }
+            free(local_result);
+            return 0;
+        }
+        if (value.kind != VM_JSON_COMMA) {
+            vm_json_free_token(&value);
+            free(local_result);
+            return 0;
+        }
+    }
+}
+
+static int vm_json_search_match_array(
+    VMJsonParser *parser,
+    const char *match_key,
+    const char *match_value,
+    const char *result_key,
+    char **out
+) {
+    for (;;) {
+        VMJsonToken value = vm_json_next(parser);
+        if (value.kind == VM_JSON_RBRACKET) return 0;
+        if (vm_json_search_match_from_token(parser, value, match_key, match_value, result_key, out)) return 1;
+        value = vm_json_next(parser);
+        if (value.kind == VM_JSON_RBRACKET) return 0;
+        if (value.kind != VM_JSON_COMMA) {
+            vm_json_free_token(&value);
+            return 0;
+        }
+    }
+}
+
+static int vm_json_search_match_from_token(
+    VMJsonParser *parser,
+    VMJsonToken token,
+    const char *match_key,
+    const char *match_value,
+    const char *result_key,
+    char **out
+) {
+    switch (token.kind) {
+        case VM_JSON_LBRACE:
+            return vm_json_search_match_object(parser, match_key, match_value, result_key, out);
+        case VM_JSON_LBRACKET:
+            return vm_json_search_match_array(parser, match_key, match_value, result_key, out);
+        case VM_JSON_STRING:
+        case VM_JSON_NUMBER:
+            vm_json_free_token(&token);
+            return 0;
+        default:
+            return 0;
+    }
+}
+
+char *vm_json_find_string_in_object_with_string(
+    const char *json,
+    const char *match_key,
+    const char *match_value,
+    const char *result_key
+) {
+    VMJsonParser parser;
+    VMJsonToken token;
+    char *out = NULL;
+
+    if (!json || !match_key || !match_value || !result_key) return NULL;
+    parser.src = json;
+    parser.pos = 0;
+    token = vm_json_next(&parser);
+    if (vm_json_search_match_from_token(&parser, token, match_key, match_value, result_key, &out)) return out;
     return NULL;
 }
 

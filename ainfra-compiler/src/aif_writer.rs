@@ -20,8 +20,8 @@ struct AifObject {
     pointers: Vec<AifPointer>,
 }
 
-pub fn write_aif(program: &Program) -> Result<Vec<u8>, CompileError> {
-    let objects = build_objects(program);
+pub fn write_aif(program: &Program, namespace: &str) -> Result<Vec<u8>, CompileError> {
+    let objects = build_objects(program, namespace);
     let mut writer = Writer::new();
     writer.bytes.extend_from_slice(MAGIC);
     writer.u16(VERSION);
@@ -46,7 +46,7 @@ pub fn write_aif(program: &Program) -> Result<Vec<u8>, CompileError> {
     Ok(writer.bytes)
 }
 
-fn build_objects(program: &Program) -> Vec<AifObject> {
+fn build_objects(program: &Program, namespace: &str) -> Vec<AifObject> {
     let mut objects = Vec::new();
     for block in &program.blocks {
         let mut pointers = Vec::new();
@@ -54,13 +54,13 @@ fn build_objects(program: &Program) -> Vec<AifObject> {
             if let Some(model) = prop_ref(&block.properties, "model") {
                 pointers.push(AifPointer {
                     pointer_type: "uses".to_string(),
-                    target_object_id: object_id(ObjectType::Model, model),
+                    target_object_id: object_id(namespace, ObjectType::Model, model),
                 });
             }
             if let Some(prompt) = prop_ref(&block.properties, "prompt") {
                 pointers.push(AifPointer {
                     pointer_type: "uses".to_string(),
-                    target_object_id: object_id(ObjectType::Prompt, prompt),
+                    target_object_id: object_id(namespace, ObjectType::Prompt, prompt),
                 });
             }
         }
@@ -70,7 +70,7 @@ fn build_objects(program: &Program) -> Vec<AifObject> {
             {
                 pointers.push(AifPointer {
                     pointer_type: "routes".to_string(),
-                    target_object_id: object_id(ObjectType::Agent, agent),
+                    target_object_id: object_id(namespace, ObjectType::Agent, agent),
                 });
             }
         }
@@ -90,7 +90,7 @@ fn build_objects(program: &Program) -> Vec<AifObject> {
             a.pointer_type == b.pointer_type && a.target_object_id == b.target_object_id
         });
         objects.push(AifObject {
-            object_id: object_id(block.kind, &block.name),
+            object_id: object_id(namespace, block.kind, &block.name),
             name: block.name.clone(),
             object_type: block.kind.as_str().to_string(),
             start: false,
@@ -105,6 +105,7 @@ fn build_objects(program: &Program) -> Vec<AifObject> {
             run,
             index,
             run.start || (!any_start && index == 0),
+            namespace,
         ));
     }
     objects.sort_by(|a, b| (&a.object_type, &a.name).cmp(&(&b.object_type, &b.name)));
@@ -130,7 +131,7 @@ fn optimize_properties(properties: &[Property]) -> Vec<Property> {
         .collect()
 }
 
-fn run_object(run: &RunStmt, index: usize, start: bool) -> AifObject {
+fn run_object(run: &RunStmt, index: usize, start: bool, namespace: &str) -> AifObject {
     let kind = run.kind.as_deref().unwrap_or("agent");
     let target_type = match kind {
         "model" => ObjectType::Model,
@@ -154,20 +155,28 @@ fn run_object(run: &RunStmt, index: usize, start: bool) -> AifObject {
         });
     }
     AifObject {
-        object_id: format!("run:{}", index + 1),
+        object_id: namespaced_id(namespace, &format!("run:{}", index + 1)),
         name: format!("run_{}", index + 1),
         object_type: "run".to_string(),
         start,
         properties,
         pointers: vec![AifPointer {
             pointer_type: "runs".to_string(),
-            target_object_id: object_id(target_type, &run.target),
+            target_object_id: object_id(namespace, target_type, &run.target),
         }],
     }
 }
 
-fn object_id(kind: ObjectType, name: &str) -> String {
-    format!("{}:{name}", kind.as_str())
+fn object_id(namespace: &str, kind: ObjectType, name: &str) -> String {
+    namespaced_id(namespace, &format!("{}:{name}", kind.as_str()))
+}
+
+fn namespaced_id(namespace: &str, local_id: &str) -> String {
+    if namespace.is_empty() {
+        local_id.to_string()
+    } else {
+        format!("{namespace}::{local_id}")
+    }
 }
 
 fn prop_ref<'a>(properties: &'a [Property], key: &str) -> Option<&'a str> {

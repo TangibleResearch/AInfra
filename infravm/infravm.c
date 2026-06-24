@@ -12,6 +12,12 @@
 #include "vm_ollama.h"
 
 #define AIF_VERSION 1
+#define AIF_MAX_FILE_BYTES (64u * 1024u * 1024u)
+#define AIF_MAX_OBJECTS 4096u
+#define AIF_MAX_PROPERTIES 4096u
+#define AIF_MAX_POINTERS 4096u
+#define AIF_MAX_LIST_ITEMS 8192u
+#define AIF_MAX_STRING_BYTES (1024u * 1024u)
 
 typedef enum {
     VAL_STRING = 1,
@@ -81,7 +87,7 @@ static void *xcalloc(InfraVM *vm, size_t count, size_t size) {
 }
 
 static int ensure_bytes(InfraVM *vm, Reader *reader, size_t count) {
-    if (reader->pos + count > reader->len) {
+    if (count > reader->len || reader->pos > reader->len - count) {
         vm_set_error(vm, "truncated AIF file");
         return 0;
     }
@@ -124,6 +130,11 @@ static uint32_t read_u32(InfraVM *vm, Reader *reader, int *ok) {
 static char *read_string(InfraVM *vm, Reader *reader, int *ok) {
     uint32_t len = read_u32(vm, reader, ok);
     char *text;
+    if (*ok && len > AIF_MAX_STRING_BYTES) {
+        vm_set_error(vm, "AIF string exceeds size limit");
+        *ok = 0;
+        return NULL;
+    }
     if (!*ok || !ensure_bytes(vm, reader, len)) {
         *ok = 0;
         return NULL;
@@ -159,6 +170,11 @@ static Value read_value(InfraVM *vm, Reader *reader, int *ok) {
         case VAL_LIST:
             value.item_count = read_u32(vm, reader, ok);
             if (!*ok) break;
+            if (value.item_count > AIF_MAX_LIST_ITEMS) {
+                vm_set_error(vm, "AIF list exceeds item limit");
+                *ok = 0;
+                break;
+            }
             if (value.item_count > 0) {
                 value.items = xcalloc(vm, value.item_count, sizeof(Value));
                 if (!value.items) {
@@ -231,6 +247,11 @@ static unsigned char *read_file_bytes(InfraVM *vm, const char *path, size_t *len
         vm_set_error(vm, "failed to size AIF file");
         return NULL;
     }
+    if ((unsigned long)size > AIF_MAX_FILE_BYTES) {
+        fclose(file);
+        vm_set_error(vm, "AIF file exceeds size limit");
+        return NULL;
+    }
     rewind(file);
     bytes = malloc((size_t)size);
     if (size > 0 && !bytes) {
@@ -290,11 +311,56 @@ static float prop_float(AIFObject *object, const char *key, float fallback) {
 
 static AIFObject *find_object(InfraVM *vm, const char *object_id) {
     uint32_t i;
+    AIFObject *match = NULL;
+    size_t id_len;
     if (!vm || !object_id) return NULL;
     for (i = 0; i < vm->object_count; i++) {
         if (strcmp(vm->objects[i].object_id, object_id) == 0) return &vm->objects[i];
     }
+    id_len = strlen(object_id);
+    for (i = 0; i < vm->object_count; i++) {
+        char *sep = strstr(vm->objects[i].object_id, "::");
+        const char *local_id = sep ? sep + 2 : vm->objects[i].object_id;
+        if (strcmp(local_id, object_id) == 0) {
+            if (match) return NULL;
+            match = &vm->objects[i];
+        } else {
+            size_t full_len = strlen(vm->objects[i].object_id);
+            if (full_len > id_len + 2 &&
+                strcmp(vm->objects[i].object_id + full_len - id_len, object_id) == 0 &&
+                vm->objects[i].object_id[full_len - id_len - 1] == ':') {
+                if (match) return NULL;
+                match = &vm->objects[i];
+            }
+        }
+    }
+    if (match) return match;
     return NULL;
+}
+
+static char *object_ref_for_local(AIFObject *context, const char *kind, const char *name) {
+    const char *sep;
+    size_t ns_len = 0;
+    size_t needed;
+    char *out;
+    if (!kind || !name) return NULL;
+    if (strstr(name, "::")) {
+        needed = strlen(name) + 1;
+        out = malloc(needed);
+        if (out) snprintf(out, needed, "%s", name);
+        return out;
+    }
+    sep = context && context->object_id ? strstr(context->object_id, "::") : NULL;
+    if (sep) ns_len = (size_t)(sep - context->object_id);
+    needed = ns_len + (ns_len ? 2 : 0) + strlen(kind) + 1 + strlen(name) + 1;
+    out = malloc(needed);
+    if (!out) return NULL;
+    if (ns_len) {
+        snprintf(out, needed, "%.*s::%s:%s", (int)ns_len, context->object_id, kind, name);
+    } else {
+        snprintf(out, needed, "%s:%s", kind, name);
+    }
+    return out;
 }
 
 static AIFObject *find_start(InfraVM *vm) {
@@ -395,6 +461,11 @@ int infravm_load_file(InfraVM *vm, const char *path) {
         free(bytes);
         return 0;
     }
+    if (object_count > AIF_MAX_OBJECTS) {
+        free(bytes);
+        vm_set_error(vm, "AIF object count exceeds limit");
+        return 0;
+    }
     vm->objects = xcalloc(vm, object_count, sizeof(AIFObject));
     if (!vm->objects) {
         free(bytes);
@@ -409,6 +480,10 @@ int infravm_load_file(InfraVM *vm, const char *path) {
         object->type = read_string(vm, &reader, &ok);
         object->start_flag = read_u8(vm, &reader, &ok) != 0;
         object->property_count = read_u32(vm, &reader, &ok);
+        if (ok && object->property_count > AIF_MAX_PROPERTIES) {
+            vm_set_error(vm, "AIF property count exceeds limit");
+            ok = 0;
+        }
         if (object->property_count > 0) {
             object->properties = xcalloc(vm, object->property_count, sizeof(AIFProperty));
             if (!object->properties) ok = 0;
@@ -418,6 +493,10 @@ int infravm_load_file(InfraVM *vm, const char *path) {
             object->properties[j].value = read_value(vm, &reader, &ok);
         }
         object->pointer_count = read_u32(vm, &reader, &ok);
+        if (ok && object->pointer_count > AIF_MAX_POINTERS) {
+            vm_set_error(vm, "AIF pointer count exceeds limit");
+            ok = 0;
+        }
         if (object->pointer_count > 0) {
             object->pointers = xcalloc(vm, object->pointer_count, sizeof(AIFPointer));
             if (!object->pointers) ok = 0;
@@ -426,7 +505,10 @@ int infravm_load_file(InfraVM *vm, const char *path) {
             object->pointers[j].pointer_type = read_string(vm, &reader, &ok);
             object->pointers[j].target_object_id = read_string(vm, &reader, &ok);
         }
-        (void)read_u32(vm, &reader, &ok);
+        if (read_u32(vm, &reader, &ok) != 0 && ok) {
+            vm_set_error(vm, "AIF instructions are reserved but not executable in v1");
+            ok = 0;
+        }
     }
 
     free(bytes);
@@ -440,18 +522,26 @@ int infravm_load_file(InfraVM *vm, const char *path) {
 static int pointrun_agent(InfraVM *vm, AIFObject *agent, const char *input) {
     const char *model_ref = prop_text(agent, "model");
     const char *prompt_ref = prop_text(agent, "prompt");
-    char model_id[256];
-    char prompt_id[256];
+    char *model_id;
+    char *prompt_id;
     AIFObject *model;
     AIFObject *prompt_object;
     const char *template_text;
     char *final_prompt;
     const char *engine;
 
-    snprintf(model_id, sizeof(model_id), "model:%s", model_ref ? model_ref : "");
-    snprintf(prompt_id, sizeof(prompt_id), "prompt:%s", prompt_ref ? prompt_ref : "");
+    model_id = object_ref_for_local(agent, "model", model_ref ? model_ref : "");
+    prompt_id = object_ref_for_local(agent, "prompt", prompt_ref ? prompt_ref : "");
+    if (!model_id || !prompt_id) {
+        free(model_id);
+        free(prompt_id);
+        vm_set_error(vm, "failed to allocate object reference");
+        return 0;
+    }
     model = find_object(vm, model_id);
     prompt_object = find_object(vm, prompt_id);
+    free(model_id);
+    free(prompt_id);
     if (!model) {
         vm_set_error(vm, "agent model pointer could not be resolved");
         return 0;
@@ -490,7 +580,16 @@ static int pointrun_agent(InfraVM *vm, AIFObject *agent, const char *input) {
     case OPT_PROVIDER_OLLAMA: {
         VMOllamaResult result = vm_ollama_generate(prop_text(model, "name"), final_prompt);
         free(final_prompt);
-        printf("InfraVM stub: %s\n", result.error);
+        if (!result.ok) {
+            vm_set_errorf(vm, "Ollama connector failed", result.error);
+            printf("InfraVM error: %s\n", infravm_last_error(vm));
+            vm_ollama_free_result(&result);
+            return 0;
+        }
+        if (result.error[0]) {
+            printf("InfraVM notice: %s\n", result.error);
+        }
+        printf("InfraVM output: %s\n", result.text ? result.text : "");
         vm_ollama_free_result(&result);
         return 1;
     }
@@ -603,23 +702,33 @@ static void debug_print_registry(InfraVM *vm) {
 int main(int argc, char **argv) {
     InfraVM *vm;
     int ok;
-    if (argc < 2 || argc > 3 || strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0) {
-        fprintf(stderr, "Usage: %s program.aif [object_id]\n", argv[0]);
+    int debug = 0;
+    const char *file_path;
+    const char *object_id = NULL;
+    int argi = 1;
+    if (argc >= 2 && strcmp(argv[1], "--debug") == 0) {
+        debug = 1;
+        argi++;
+    }
+    if (argc <= argi || argc > argi + 2 || strcmp(argv[argi], "--help") == 0 || strcmp(argv[argi], "-h") == 0) {
+        fprintf(stderr, "Usage: %s [--debug] program.aif [object_id]\n", argv[0]);
         return argc == 2 ? 0 : 2;
     }
+    file_path = argv[argi];
+    if (argc == argi + 2) object_id = argv[argi + 1];
 
     vm = infravm_create();
     if (!vm) {
         fprintf(stderr, "InfraVM error: out of memory\n");
         return 1;
     }
-    if (!infravm_load_file(vm, argv[1])) {
+    if (!infravm_load_file(vm, file_path)) {
         fprintf(stderr, "InfraVM error: %s\n", infravm_last_error(vm));
         infravm_destroy(vm);
         return 1;
     }
-    debug_print_registry(vm);
-    ok = argc == 3 ? infravm_pointrun(vm, argv[2]) : infravm_run_start(vm);
+    if (debug) debug_print_registry(vm);
+    ok = object_id ? infravm_pointrun(vm, object_id) : infravm_run_start(vm);
     if (!ok) {
         fprintf(stderr, "InfraVM error: %s\n", infravm_last_error(vm));
         infravm_destroy(vm);

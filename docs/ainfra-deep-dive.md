@@ -14,7 +14,7 @@ AInfra source (.ainfra)
   -> InfraOS backend/UI control plane
 ```
 
-The project currently behaves like a prototype infrastructure runtime with a real compiler/VM/control-plane skeleton. It is not production secure yet. It has a useful local developer workflow, SQLite-backed dashboard auth, a web IDE, a local Ops Assistant, provider-key status reporting, and live OpenAI connector support in the VM. Other model providers are registered but stubbed.
+The project currently behaves like a prototype infrastructure runtime with a real compiler/VM/control-plane skeleton. It is not production secure yet. It has a useful local developer workflow, SQLite-backed dashboard auth, a web IDE, a local Ops Assistant, provider-key status reporting, live OpenAI connector support, and a local Ollama path that falls back to deterministic VM output when Ollama is not running. Other cloud model providers are registered but stubbed.
 
 ## Repository Layout
 
@@ -55,7 +55,7 @@ AInfra describes AI infrastructure as objects:
 
 The compiler turns those declarations into AIF objects. Each AIF object has:
 
-- an object id such as `model:local`, `prompt:answer`, `agent:helper`, `run:1`;
+- a namespaced object id such as `local-stub::model:local`, `local-stub::prompt:answer`, `local-stub::agent:helper`, `local-stub::run:1`;
 - a type such as `model`, `prompt`, `agent`, `port`, `run`;
 - properties;
 - pointers to other objects;
@@ -375,7 +375,7 @@ Current provider behavior:
 | Engine | Runtime behavior |
 | --- | --- |
 | `openai` | live HTTPS connector through `vm_openai.h` |
-| `ollama` | registered local stub |
+| `ollama` | local runtime connector with deterministic fallback |
 | `anthropic` | registered stub |
 | `gemini` | registered stub |
 | `microsoft` | registered stub |
@@ -400,11 +400,7 @@ export OPENAI_API_KEY="..."
 ./infravm/infravm data/objects/hello.aif
 ```
 
-The Ollama connector is currently a stub:
-
-```text
-InfraVM stub: Ollama connector is a VM v0.1 stub
-```
+The Ollama connector calls `http://127.0.0.1:11434/api/generate` when Ollama is available. If it is not reachable, InfraVM still returns deterministic local VM output so local runs visibly execute and produce receipts.
 
 That is still useful for local compile/run demos because it avoids requiring cloud API keys.
 
@@ -569,7 +565,7 @@ Default bootstrap:
 
 ```text
 username: admin
-password: admin
+password: generated in data/admin-password.txt unless INFRAOS_ADMIN_PASSWORD is set
 ```
 
 The password is not stored in plaintext. It is hashed using:
@@ -735,7 +731,7 @@ It supports:
 
 Templates:
 
-- Local Agent: uses `ollama` stub for safe local demos.
+- Local Agent: uses `ollama` for safe local demos, with deterministic VM fallback when Ollama is not running.
 - OpenAI Agent: uses live OpenAI connector if `OPENAI_API_KEY` is available.
 - Port: creates a port-style object graph, but full port serving is not implemented.
 
@@ -835,7 +831,7 @@ export HUGGINGFACE_API_KEY="..."
 export HF_TOKEN="..."
 ```
 
-Only OpenAI is live in InfraVM today. The others are reported in status and registered as future/stub providers.
+OpenAI is live through the cloud API. Ollama/local runs through a local connector with fallback output. The other providers are reported in status and registered as future/stub providers.
 
 ## CI/CD
 
@@ -901,18 +897,17 @@ Things that are good:
 
 Things that are not production-ready:
 
-- default `admin/admin` must be changed;
+- generated first-run admin credentials still need a password-change flow;
 - no HTTPS termination is configured;
-- CORS currently allows all origins;
+- CORS is local-origin restricted by default and configurable with `INFRAOS_CORS_ORIGINS`;
 - localStorage token storage is convenient but not ideal for high-security deployments;
-- session expiry is not implemented;
-- endpoint privilege enforcement is incomplete outside admin/auth routes;
+- sessions expire according to `INFRAOS_SESSION_TTL_SECONDS`, but refresh-token rotation is not implemented;
 - no audit-log hardening;
 - no rate limiting;
 - no CSRF protection;
 - no multi-tenant isolation model;
 - VM execution runs local binaries and should be sandboxed before untrusted use;
-- OpenAI connector is live but other provider connectors are stubs.
+- OpenAI and local Ollama/fallback are live enough for demos, but other provider connectors are stubs.
 
 ## Current Limitations
 
@@ -926,14 +921,14 @@ Language/compiler:
 
 AIF:
 
-- instruction section exists as a count, but v0.1 writes zero instructions;
-- object ids can collide across multiple compiled files in the global registry;
+- instruction section exists as a count, but v0.1 writes zero instructions and loaders reject nonzero instructions until encoding is designed;
+- object ids are namespaced by compiled file/project, but there is no package-level import/linking model yet;
 - `optimizer_hash` is not cryptographic integrity.
 
 InfraVM:
 
 - only OpenAI connector is live;
-- Ollama and other providers are stubs;
+- Anthropic, Gemini, Microsoft, DeepSeek, and Hugging Face providers are stubs;
 - no sandboxing;
 - no concurrency model;
 - no real port server runtime;
@@ -952,8 +947,8 @@ InfraOS:
 
 The natural next steps are:
 
-1. Add complete endpoint privilege enforcement.
-2. Add session expiry and password-change flows.
+1. Add password-change and recovery flows.
+2. Add structured audit logs and rate limiting.
 3. Add real Ollama connector support.
 4. Add Anthropic/Gemini/DeepSeek/Hugging Face connectors.
 5. Add a real port server runtime.

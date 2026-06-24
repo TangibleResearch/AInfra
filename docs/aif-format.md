@@ -38,10 +38,14 @@ Value tags:
 
 Pointers emitted in v0.1:
 
-- `agent.model` creates `uses -> model:name`
-- `agent.prompt` creates `uses -> prompt:name`
-- `port.agent` creates `routes -> agent:name`
-- `run agent X` creates `runs -> agent:X`
+- `agent.model` creates `uses -> namespace::model:name`
+- `agent.prompt` creates `uses -> namespace::prompt:name`
+- `port.agent` or `port.route` creates `routes -> namespace::agent:name`
+- `run agent X` creates `runs -> namespace::agent:X`
+
+Object IDs are namespaced by the compiler from the output file or `--namespace`, for example `local-stub::run:1`. InfraVM accepts short aliases such as `run:1` only when they resolve unambiguously inside the loaded file.
+
+The `instruction_count` field is reserved. AIF v1 writers emit `0`, and current loaders reject nonzero instruction counts until the instruction encoding is designed.
 
 The compiler uses the Rust Optimizer before writing AIF:
 
